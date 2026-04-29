@@ -173,15 +173,24 @@ These are the same codes the HP DeskJet 500 responded to over its Centronics par
 
 ### Font  `ESC ( s # X`
 
-| Code | Effect |
-|---|---|
-| `ESC ( s 3B` | Bold on |
-| `ESC ( s 0B` | Bold off |
-| `ESC ( s 1I` | Italic on |
-| `ESC ( s 0I` | Italic off |
+### Font Style
+
+| Code         | Effect        |
+|--------------|---------------|
+| `ESC ( s 3B` | Bold on       |
+| `ESC ( s 0B` | Bold off      |
+| `ESC ( s 1I` | Italic on     |
+| `ESC ( s 0I` | Italic off    |
+| `ESC ( s 1U` | Underline on  |
+| `ESC ( s 0U` | Underline off |
+
+### Font Metrics
+
+| Code          | Effect           |
+|---------------|------------------|
 | `ESC ( s 10H` | 10 CPI (default) |
-| `ESC ( s 17H` | 17 CPI compressed |
-| `ESC ( s 12V` | 12 point |
+| `ESC ( s 17H` | 17 CPI compressed|
+| `ESC ( s 12V` | 12 point         |
 
 ### Page `ESC & l # X`
 
@@ -213,13 +222,27 @@ Control characters `CR` `LF` `FF` `BS` `HT` `VT` are all handled as the real pri
 
 The full 256-character IBM Code Page 437 is rendered. All byte values print their CP437 glyph except `0x08`–`0x0D` which are interpreted as printer controls.
 
-**Box drawing**
-
 ```
-Single:  ┌─┬─┐  ├─┼─┤  └─┴─┘  │    DA C4 C2 BF / C3 C5 B4 / C0 C1 D9 / B3
-Double:  ╔═╦═╗  ╠═╬═╣  ╚═╩═╝  ║    C9 CD CB BB / CC CE B9 / C8 CA BC / BA
-Shading: ░ ▒ ▓ █                    B0 B1 B2 DB
-Halves:  ▄ ▀ ▌ ▐                    DC DF DD DE
+CP437 CHARACTER TABLE (00–FF)
+Hex rows × columns (0–F)
+
+     00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F
+00 |    ☺  ☻  ♥  ♦  ♣  ♠  •  ◘  ○  ◙  ♂  ♀  ♪  ♫  ☼
+10 | ►  ◄  ↕  ‼  ¶  §  ▬  ↨  ↑  ↓  →  ←  ∟  ↔  ▲  ▼
+20 |    !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+30 | 0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+40 | @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+50 | P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+60 | `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+70 | p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~  ⌂
+80 | Ç  ü  é  â  ä  à  å  ç  ê  ë  è  ï  î  ì  Ä  Å
+90 | É  æ  Æ  ô  ö  ò  û  ù  ÿ  Ö  Ü  ¢  £  ¥  ₧  ƒ
+A0 | á  í  ó  ú  ñ  Ñ  ª  º  ¿  ⌐  ¬  ½  ¼  ¡  «  »
+B0 | ░  ▒  ▓  │  ┤  ╡  ╢  ╖  ╕  ╣  ║  ╗  ╝  ╜  ╛  ┐
+C0 | └  ┴  ┬  ├  ─  ┼  ╞  ╟  ╚  ╔  ╩  ╦  ╠  ═  ╬  ╧
+D0 | ╨  ╤  ╥  ╙  ╘  ╒  ╓  ╫  ╪  ┘  ┌  █  ▄  ▌  ▐  ▀
+E0 | α  ß  Γ  π  Σ  σ  µ  τ  Φ  Θ  Ω  δ  ∞  φ  ε  ∩
+F0 | ≡  ±  ≥  ≤  ⌠  ⌡  ÷  ≈  °  ∙  ·  √  ⁿ  ²  ■                
 ```
 
 ---
@@ -291,4 +314,26 @@ README.md           This file
 
 ## License
 
-MIT. Do whatever you like with it. If you use it to print an actual 1993 invoice, that would be excellent.
+MIT. Do whatever you like with it. If you use it to print (or email) an actual invoice from 1993, that would be excellent.
+
+MIT License
+
+Copyright (c) 2026 Dave Collins
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

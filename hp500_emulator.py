@@ -21,6 +21,8 @@ Usage:
 
 import sys, os, re, math, random, argparse, struct
 from io import BytesIO
+#from turtle import width # this is nologer used.
+#from turtle import st  # This is nolonger used. 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageChops
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.pagesizes import letter as LETTER_SIZE, A4 as A4_SIZE
@@ -89,6 +91,8 @@ PAPER_SIZES = {
 }
 
 DPI = 300  # render resolution
+
+UNDERLINE_THICKNESS = 3  # pixels
 
 FONT_REGULAR = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf'
 FONT_BOLD    = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf'
@@ -448,6 +452,8 @@ class HP500Renderer:
                 st.bold = (ival >= 3)
             elif term == 'I':  # style (1 = italic)
                 st.italic = (ival == 1)
+            elif term == 'U':  # underline
+                st.underline = (ival == 1)
             elif term == 'S':  # symbol set style — ignore for now
                 pass
 
@@ -527,10 +533,17 @@ class HP500Renderer:
         # ── Underline ──
         if st.underline:
             ul_y = baseline_y + ascent + 2
+
+            base_width = UNDERLINE_THICKNESS
+            if self.artifacts:
+                base_width += 1
+            else:
+                base_width += 2
+
             draw.line(
                 [(st.cursor_x, ul_y), (st.cursor_x + cw - 1, ul_y)],
                 fill=ink + (220,),
-                width=max(1, round(DPI / 150))
+                width=base_width
             )
 
         # ── Draft mode banding: simulate inkjet pass lines ──
@@ -732,32 +745,32 @@ HP DeskJet 500 Emulator \x14 System Test\r\n\
 \x1b(s3BSingle-Line Box Drawing:\x1b(s0B\r\n\
 \r\n\
   \xda\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc2\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xbf\r\n\
-  \xb3  Column A                \xb3  Column B                \xb3\r\n\
+  \xb3  Column A        \xb3  Column B         \xb3\r\n\
   \xc3\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc5\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xb4\r\n\
-  \xb3  Item One                \xb3  Value 001               \xb3\r\n\
-  \xb3  Item Two                \xb3  Value 002               \xb3\r\n\
-  \xb3  Item Three              \xb3  Value 003               \xb3\r\n\
+  \xb3  Item One        \xb3  Value 001        \xb3\r\n\
+  \xb3  Item Two        \xb3  Value 002        \xb3\r\n\
+  \xb3  Item Three      \xb3  Value 003        \xb3\r\n\
   \xc0\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc1\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xc4\xd9\r\n\
 \r\n\
 \x1b(s3BDouble-Line Box Drawing:\x1b(s0B\r\n\
 \r\n\
   \xc9\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcb\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xbb\r\n\
-  \xba  INVOICE                 \xba  NUMBER                  \xba\r\n\
+  \xba  INVOICE         \xba  NUMBER           \xba\r\n\
   \xcc\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xce\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xb9\r\n\
-  \xba  Widget Type A           \xba  00042                   \xba\r\n\
-  \xba  Widget Type B           \xba  00099                   \xba\r\n\
+  \xba  Widget Type A   \xba  00042            \xba\r\n\
+  \xba  Widget Type B   \xba  00099            \xba\r\n\
   \xc8\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xca\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xbc\r\n\
 \r\n\
 \x1b(s3BMixed Single/Double Box Drawing:\x1b(s0B\r\n\
 \r\n\
-  \xd5\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xd1\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xb8\r\n\
-  \xb3  Description             \xba  Qty   \xba  Price            \xb3\r\n\
-  \xd4\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcf\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xbe\r\n\
+  \xd5\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xd1\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xd1\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xb8\r\n\
+  \xb3  Description     \xb3  Qty   \xb3  Price   \xb3\r\n\
+  \xd4\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcf\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcf\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xcd\xbe\r\n\
 \r\n\
 \r\n\
 \x1b(s3BItalic and Underline Modes:\x1b(s0B\r\n\
 \r\n\
-  Normal text  \x1b(s1B Bold text \x1b(s0B  \x1b(s1I Italic text \x1b(s0I  Normal again\r\n\
+  Normal text  \x1b(s3B Bold text \x1b(s0B  \x1b(s1I Italic text \x1b(s0I \x1b(s1UUnderline text\x1b(s0U\r\n\
 \r\n\
 \r\n\
 \x0c"""
