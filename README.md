@@ -6,6 +6,22 @@ Supports the full 8-bit CP437 character set (box drawing, block elements, Greek,
 
 ---
 
+## Why not GhostPCL?
+
+GhostPCL is a full PCL5/PCL XL language interpreter. It is feature-complete across a wide range of professional printers, produces geometrically perfect output, and is the right tool when the goal is faithful, device-neutral rendering of a PCL stream. While GhostPCL produces "better than life" archival copies and can work with a text stream, it is more broadly aimed at all data streams a printer would have encountered.
+
+hp500 is something different: a hardware simulator for one specific printer. It implements the PCL3 subset the HP DeskJet 500 actually responded to over its Centronics parallel port — no more, no less — and targets the CP437 character set that DOS software sent to it. Output is intentionally imperfect in the way that printer was imperfect: ink bleed, aged paper, draft banding, and period artifacts are features, not defects. An archival (ideal) mode is available when clean output is wanted, but the default render is what the page looked like coming out of the tray, not what the data said it should look like.
+
+hp500 focuses exclusively on text-based files generated for DOS environments with embedded PCL3 control codes — the kind commonly found in hobbyist manuals, infamous online video game walkthroughs, and similar material built around the CP437 character set.
+
+Furthermore, it automatically applies an invisible character-level text layer to the PDF, allowing content to be copied and searched from any viewer that expects Unicode. This effectively brings 1980s and 1990s-era documentation into the modern computing experience in a format that is simpler and more accessible for consumption and research.
+
+Lastly, hp500 is well suited for properly formatting forms built in ASCII environments like MS-DOS Edit. Rather than treating each character as an isolated glyph, the renderer connects underscore sequences into solid fill lines and joins CP437 box-drawing characters into seamless borders — so form fields and tables that were carefully drawn in a DOS text editor arrive on the page looking the way their author intended, not as a jumble of disconnected symbols. Additionally, the margin spacing is handled with a granular integer-based algorithm that preserves the column-exact layout those environments depended on.
+
+In other words: this is a fanservice, printer-centric documentation archival tool.
+
+---
+
 ## Requirements
 
 Ubuntu flavors / Linux Mint / Debian and derivatives, 20.04 LTS onwards.
@@ -393,7 +409,7 @@ README.md           This file
 
 Linux Mint reports `ID=linuxmint` in `/etc/os-release`; `install.sh` accepts that ID directly. Standard Linux Mint uses Ubuntu package bases, while LMDE uses Debian package bases, so the apt package names used by the build chain are unchanged.
 
-Kubuntu, Xubuntu, Lubuntu, and other Ubuntu flavors use the same Ubuntu package repositories for these dependencies; only the desktop environment differs for this project.
+Kubuntu, Xubuntu, Lubuntu, and other Ubuntu flavors use the same Ubuntu package repositories for these dependencies; only the desktop environment differs for this project. Ubuntu under WSL (Windows Subsystem for Linux) and other Linux distributions with compatible package managers should work as well. The script itself is vanilla Python — it will run on any interpreter that has access to the required modules, regardless of platform. However, the install subsystem expects a pseudo-standard modicum of Linux and package management to install cleanly.
 
 ---
 
