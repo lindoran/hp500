@@ -17,16 +17,18 @@ Usage:
   python3 hp500_emulator.py input.txt output.pdf --paper a4
   python3 hp500_emulator.py input.txt output.pdf --no-artifacts
   python3 hp500_emulator.py input.txt output.pdf --cpi 17   (compressed)
+  python3 hp500_emulator.py input.txt output.pdf --auto-margins
+  python3 hp500_emulator.py --demo -o demo.pdf
 """
 
-import sys, os, re, math, random, argparse, struct
+import sys, os, re, random, argparse
 from io import BytesIO
-#from turtle import width # this is nologer used.
-#from turtle import st  # This is nolonger used. 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageChops
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.pagesizes import letter as LETTER_SIZE, A4 as A4_SIZE
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 # ---------------------------------------------------------------------------
 # CP437 → Unicode mapping (full 256 character set)
@@ -91,6 +93,8 @@ PAPER_SIZES = {
 }
 
 DPI = 300  # render resolution
+DEFAULT_HORIZONTAL_MARGIN_IN = 0.25
+DEFAULT_VERTICAL_MARGIN_IN = 0.5
 
 UNDERLINE_THICKNESS = 3  # pixels
 
@@ -111,6 +115,8 @@ if not os.path.exists(FONT_REGULAR):
 # Font cache
 # ---------------------------------------------------------------------------
 _font_cache = {}
+PDF_TEXT_FONT = 'HP500SearchText'
+_pdf_text_font_registered = False
 
 def get_font(pt_size: float, bold=False, italic=False) -> ImageFont.FreeTypeFont:
     """Return a cached PIL font at the given SCREEN point size."""
@@ -124,6 +130,18 @@ def get_font(pt_size: float, bold=False, italic=False) -> ImageFont.FreeTypeFont
                 else FONT_REGULAR)
         _font_cache[key] = ImageFont.truetype(path, pil_size)
     return _font_cache[key]
+
+
+def get_pdf_text_font_name() -> str:
+    """Register the same mono TTF for the PDF text layer when available."""
+    global _pdf_text_font_registered
+    if not _pdf_text_font_registered:
+        try:
+            pdfmetrics.registerFont(TTFont(PDF_TEXT_FONT, FONT_REGULAR))
+            _pdf_text_font_registered = True
+        except Exception:
+            return 'Courier'
+    return PDF_TEXT_FONT
 
 
 # ---------------------------------------------------------------------------
@@ -141,10 +159,10 @@ class PrinterState:
 
         # --- print area / margins (pixels) ---
         # HP DeskJet 500: min top/bottom = 0.5", left/right = 0.25"
-        self.margin_left   = round(0.5  * DPI)
-        self.margin_right  = self.page_w - round(0.5  * DPI)
-        self.margin_top    = round(0.5  * DPI)
-        self.margin_bottom = self.page_h - round(0.5  * DPI)
+        self.margin_left   = round(DEFAULT_HORIZONTAL_MARGIN_IN * DPI)
+        self.margin_right  = self.page_w - round(DEFAULT_HORIZONTAL_MARGIN_IN * DPI)
+        self.margin_top    = round(DEFAULT_VERTICAL_MARGIN_IN * DPI)
+        self.margin_bottom = self.page_h - round(DEFAULT_VERTICAL_MARGIN_IN * DPI)
 
         # --- font / pitch ---
         self.cpi        = default_cpi   # characters per inch
@@ -167,8 +185,10 @@ class PrinterState:
 
         # --- pages ---
         self.pages = []             # list of PIL Images (final, composed)
+        self.text_pages = []        # list of searchable text cell records
         self.current_layer = None   # PIL Image (ink layer, RGBA)
         self.current_draw  = None
+        self.current_text_cells = []
         self._new_page()
 
     def _recalc_page_dims(self):
@@ -207,6 +227,7 @@ class PrinterState:
         # RGBA ink layer (transparent background, black ink)
         self.current_layer = Image.new('RGBA', (self.page_w, self.page_h), (0, 0, 0, 0))
         self.current_draw  = ImageDraw.Draw(self.current_layer)
+        self.current_text_cells = []
         self.cursor_x = self.margin_left
         self.cursor_y = self.margin_top
 
@@ -218,12 +239,36 @@ class PrinterState:
         if extrema[3][1] == 0:      # alpha channel max = 0 → completely blank
             return
         self.pages.append(self.current_layer)   # raw ink, composed later
+        self.text_pages.append(self.current_text_cells)
 
     def finish(self):
         """Called at end of document — flush last page."""
         if self.current_layer is not None:
             self._flush_page()
             self.current_layer = None
+
+    def apply_margin_offsets(self, left_chars=0, right_chars=0,
+                             top_rows=0, bottom_rows=0):
+        """Apply extra CLI margins in character/row units."""
+        left_px = round(left_chars * self.char_w)
+        right_px = round(right_chars * self.char_w)
+        top_px = round(top_rows * self.line_h)
+        bottom_px = round(bottom_rows * self.line_h)
+
+        self.margin_left += left_px
+        self.margin_right -= right_px
+        self.margin_top += top_px
+        self.margin_bottom -= bottom_px
+
+        # Keep margins sane even if a user asks for something extreme.
+        self.margin_left = max(0, min(self.margin_left, self.page_w - 1))
+        self.margin_right = max(self.margin_left + self.char_w, min(self.margin_right, self.page_w))
+        self.margin_top = max(0, min(self.margin_top, self.page_h - 1))
+        self.margin_bottom = max(self.margin_top + self.line_h, min(self.margin_bottom, self.page_h))
+
+        self._rebuild_tabs()
+        self.cursor_x = self.margin_left
+        self.cursor_y = self.margin_top
 
 
 # ---------------------------------------------------------------------------
@@ -327,10 +372,15 @@ class HP500Renderer:
     # Ideal mode: pure black
     INK_IDEAL = (0, 0, 0)
 
-    def __init__(self, state: PrinterState, artifacts=True, ideal=False):
+    def __init__(self, state: PrinterState, ideal=False, jitter=False,
+                 dot_variation=False, banding=False, trim_left_chars=0):
         self.st = state
-        self.artifacts = artifacts and not ideal
         self.ideal = ideal
+        self.jitter = jitter and not ideal
+        self.dot_variation = dot_variation and not ideal
+        self.banding = banding and not ideal
+        self.trim_left_chars = max(0, int(trim_left_chars))
+        self._line_trim_remaining = self.trim_left_chars
         self._rng = random.Random(42)  # deterministic for reproducible output
 
     # ── public entry point ──────────────────────────────────────────────────
@@ -355,17 +405,25 @@ class HP500Renderer:
         st = self.st
         if b == 0x0D:   # CR
             st.cursor_x = st.margin_left
+            self._line_trim_remaining = self.trim_left_chars
         elif b == 0x0A:  # LF
             st.cursor_y += st.line_h
+            self._line_trim_remaining = self.trim_left_chars
             self._check_page_break()
         elif b == 0x0B:  # VT — vertical tab (treated as LF on DeskJet 500)
             st.cursor_y += st.line_h
+            self._line_trim_remaining = self.trim_left_chars
             self._check_page_break()
         elif b == 0x0C:  # FF — form feed
             st._new_page()
+            self._line_trim_remaining = self.trim_left_chars
         elif b == 0x08:  # BS — backspace
             st.cursor_x = max(st.margin_left, st.cursor_x - st.char_w)
         elif b == 0x09:  # HT — horizontal tab
+            if self._line_trim_remaining > 0:
+                consumed = min(self._line_trim_remaining, 8)
+                self._line_trim_remaining -= consumed
+                return
             for stop in st.tab_stops:
                 if stop > st.cursor_x + 2:
                     st.cursor_x = stop
@@ -382,8 +440,9 @@ class HP500Renderer:
             st.lpi       = 6.0
             st.point_size = 12.0
         elif ch == '9':  # ESC 9 — clear margins
-            st.margin_left  = round(0.5 * DPI)
-            st.margin_right = st.page_w - round(0.5 * DPI)
+            st.margin_left  = round(DEFAULT_HORIZONTAL_MARGIN_IN * DPI)
+            st.margin_right = st.page_w - round(DEFAULT_HORIZONTAL_MARGIN_IN * DPI)
+            st._rebuild_tabs()
         elif ch == '=':  # ESC = — half line feed up
             st.cursor_y -= st.line_h // 2
 
@@ -480,6 +539,12 @@ class HP500Renderer:
         # Map CP437 byte to Unicode glyph
         ch = CP437.get(byte_val, chr(byte_val))
 
+        if byte_val == 0x20 and self._line_trim_remaining > 0:
+            self._line_trim_remaining -= 1
+            return
+        if byte_val != 0x20:
+            self._line_trim_remaining = 0
+
         font = get_font(st.point_size, bold=st.bold, italic=st.italic)
         cw = st.char_w
         lh = st.line_h
@@ -504,8 +569,8 @@ class HP500Renderer:
         else:
             ink_base = self.INK_DRAFT
 
-        # Add per-character ink variation (subtle) — disabled in ideal mode
-        if self.artifacts and not self.ideal:
+        # Add per-character ink color variation (subtle) when requested.
+        if self.dot_variation:
             r_jitter = self._rng.randint(-6, 6)
             b_jitter = self._rng.randint(-6, 6)
             ink = (
@@ -513,11 +578,14 @@ class HP500Renderer:
                 max(0, min(255, ink_base[1])),
                 max(0, min(255, ink_base[2] + b_jitter)),
             )
+        else:
+            ink = ink_base
+
+        if self.jitter:
             # slight position jitter (±1px) for inkjet nozzle wobble
             dx = self._rng.randint(-1, 1) if st.nlq else self._rng.randint(-2, 2)
             dy = self._rng.randint(-1, 1) if st.nlq else self._rng.randint(-2, 2)
         else:
-            ink = ink_base
             dx, dy = 0, 0
 
         draw = st.current_draw
@@ -529,13 +597,22 @@ class HP500Renderer:
             font=font,
             fill=ink + (255,)   # RGBA, fully opaque
         )
+        st.current_text_cells.append({
+            'ch': ch,
+            'x': st.cursor_x,
+            'y': st.cursor_y,
+            'cw': cw,
+            'lh': lh,
+        })
 
         # ── Underline ──
         if st.underline:
             ul_y = baseline_y + ascent + 2
 
             base_width = UNDERLINE_THICKNESS
-            if self.artifacts:
+            if self.ideal:
+                base_width += 2
+            elif self.jitter or self.dot_variation:
                 base_width += 1
             else:
                 base_width += 2
@@ -547,7 +624,7 @@ class HP500Renderer:
             )
 
         # ── Draft mode banding: simulate inkjet pass lines ──
-        if self.artifacts and not st.nlq:
+        if self.banding and not st.nlq:
             # Every ~8 pixels, slightly lighter stripe (pass boundary)
             pass_height = round(DPI / 37.5)   # 8 inkjet nozzles at 300 DPI
             # Draw a semi-transparent stripe if cursor_y falls on a pass boundary
@@ -567,6 +644,7 @@ class HP500Renderer:
         st = self.st
         if st.cursor_y + st.line_h > st.margin_bottom:
             st._new_page()
+            self._line_trim_remaining = self.trim_left_chars
 
 
 # ---------------------------------------------------------------------------
@@ -652,8 +730,9 @@ def _add_page_crease(paper: Image.Image, rng) -> Image.Image:
     return paper
 
 
-def compose_page(ink_layer: Image.Image, nlq: bool, artifacts: bool,
-                 rng, page_num: int, ideal: bool = False) -> Image.Image:
+def compose_page(ink_layer: Image.Image, nlq: bool, rng, page_num: int,
+                 ideal: bool = False, aged_paper: bool = True,
+                 ink_bleed: bool = True, crease: bool = False) -> Image.Image:
     """Composite ink onto paper with all post-processing."""
     w, h = ink_layer.size
 
@@ -661,24 +740,27 @@ def compose_page(ink_layer: Image.Image, nlq: bool, artifacts: bool,
         # Perfect white paper, no processing
         paper = Image.new('RGB', (w, h), (255, 255, 255))
         ink_composite = ink_layer
-    elif artifacts:
-        import random as _r
-        # Use a seeded per-page RNG
-        try:
-            import numpy as np
-            np_rng = np.random.default_rng(page_num * 137 + 7)
-            paper = _make_paper_texture(w, h, np_rng, aged=True)
-        except ImportError:
-            paper = Image.new('RGB', (w, h), (245, 241, 230))
-        paper = _add_page_crease(paper, rng)
-
-        if nlq:
-            ink_composite = _apply_nlq_ink_bleed(ink_layer)
-        else:
-            ink_composite = _apply_draft_artifacts(ink_layer, rng)
     else:
-        paper = Image.new('RGB', (w, h), (255, 255, 255))
-        ink_composite = ink_layer
+        # Use a seeded per-page RNG
+        if aged_paper:
+            try:
+                import numpy as np
+                np_rng = np.random.default_rng(page_num * 137 + 7)
+                paper = _make_paper_texture(w, h, np_rng, aged=True)
+            except ImportError:
+                paper = Image.new('RGB', (w, h), (245, 241, 230))
+        else:
+            paper = Image.new('RGB', (w, h), (255, 255, 255))
+
+        if crease:
+            paper = _add_page_crease(paper, rng)
+
+        if ink_bleed and nlq:
+            ink_composite = _apply_nlq_ink_bleed(ink_layer)
+        elif ink_bleed:
+            ink_composite = _apply_draft_artifacts(ink_layer, rng)
+        else:
+            ink_composite = ink_layer
 
     # Alpha-composite ink onto paper
     paper_rgba = paper.convert('RGBA')
@@ -690,7 +772,8 @@ def compose_page(ink_layer: Image.Image, nlq: bool, artifacts: bool,
 # PDF assembly using ReportLab
 # ---------------------------------------------------------------------------
 
-def build_pdf(pages_rgb: list, output_path: str, paper: str, orientation: str):
+def build_pdf(pages_rgb: list, output_path: str, paper: str, orientation: str,
+              text_pages=None, searchable=True):
     """Render list of PIL RGB images into a PDF at correct physical size."""
     w_in, h_in = PAPER_SIZES.get(paper, PAPER_SIZES['letter'])
     if orientation == 'landscape':
@@ -703,7 +786,10 @@ def build_pdf(pages_rgb: list, output_path: str, paper: str, orientation: str):
     c.setAuthor('HP DeskJet 500 Emulator')
     c.setSubject('Printed document — 300 DPI')
 
-    for page_img in pages_rgb:
+    text_pages = text_pages or []
+    text_font = get_pdf_text_font_name()
+
+    for page_num, page_img in enumerate(pages_rgb):
         buf = BytesIO()
         # Save as JPEG (quality 92) for authentic inkjet look + compact file size
         page_img.save(buf, format='JPEG', quality=92, subsampling=0, optimize=True)
@@ -713,6 +799,29 @@ def build_pdf(pages_rgb: list, output_path: str, paper: str, orientation: str):
             img_reader, 0, 0, width=w_pt, height=h_pt,
             preserveAspectRatio=True, anchor='nw'
         )
+        if searchable and page_num < len(text_pages):
+            c.saveState()
+            c.setFillColorRGB(0, 0, 0, alpha=0)
+            for cell in text_pages[page_num]:
+                ch = cell['ch']
+                if not ch:
+                    continue
+                cell_w_pt = cell['cw'] * 72.0 / DPI
+                line_h_pt = cell['lh'] * 72.0 / DPI
+                font_size = max(1.0, line_h_pt)
+                glyph_w = c.stringWidth(ch, text_font, font_size) or cell_w_pt
+                horiz_scale = max(1.0, (cell_w_pt / glyph_w) * 100.0)
+                x_pt = cell['x'] * 72.0 / DPI
+                # Put the invisible glyph inside the same emulated cell. PDF
+                # text uses a baseline from the bottom of the page.
+                y_pt = h_pt - ((cell['y'] + cell['lh']) * 72.0 / DPI)
+                c.setFont(text_font, font_size)
+                text = c.beginText(x_pt, y_pt)
+                text.setHorizScale(horiz_scale)
+                text.setCharSpace(0)
+                text.textOut(ch)
+                c.drawText(text)
+            c.restoreState()
         c.showPage()
 
     c.save()
@@ -775,6 +884,57 @@ HP DeskJet 500 Emulator \x14 System Test\r\n\
 \r\n\
 \x0c"""
 
+
+def infer_common_left_margin_chars(data: bytes) -> int:
+    """
+    Find common leading spaces across nonblank printable lines.
+
+    PCL escape sequences are ignored via parse_pcl_stream(), so font and layout
+    commands do not pollute the margin scan. Tabs count to the next 8-column
+    stop for this preflight pass.
+    """
+    lines = []
+    line = []
+    last_was_cr = False
+
+    def finish_line():
+        nonlocal line
+        text = ''.join(line)
+        if text.strip():
+            lines.append(text)
+        line = []
+
+    for tok in parse_pcl_stream(data):
+        kind = tok[0]
+        if kind == 'char':
+            byte_val = tok[1]
+            line.append(' ' if byte_val == 0x20 else 'x')
+            last_was_cr = False
+        elif kind == 'ctrl':
+            b = tok[1]
+            if b == 0x09:  # HT
+                next_tab = ((len(line) // 8) + 1) * 8
+                line.extend(' ' for _ in range(next_tab - len(line)))
+                last_was_cr = False
+            elif b == 0x0D:  # CR
+                finish_line()
+                last_was_cr = True
+            elif b in (0x0A, 0x0B, 0x0C):  # LF, VT, FF
+                if not last_was_cr:
+                    finish_line()
+                last_was_cr = False
+            elif b == 0x08 and line:  # BS
+                line.pop()
+
+    if line:
+        finish_line()
+
+    if not lines:
+        return 0
+
+    return min(len(text) - len(text.lstrip(' ')) for text in lines)
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -786,6 +946,10 @@ def main():
                         help='Input file (ASCII/PCL).  Omit to print demo doc.')
     parser.add_argument('output', nargs='?', default='output.pdf',
                         help='Output PDF path  [default: output.pdf]')
+    parser.add_argument('-o', '--output-file', dest='output_file',
+                        help='Output PDF path  [overrides positional output]')
+    parser.add_argument('--demo', action='store_true',
+                        help='Print the built-in demo document')
     parser.add_argument('--paper', choices=['letter','legal','a4','executive'],
                         default='letter', help='Paper size [default: letter]')
     parser.add_argument('--landscape', action='store_true',
@@ -798,9 +962,38 @@ def main():
                         help='Lines per inch [default: 6]')
     parser.add_argument('--ideal', action='store_true',
                         help='Ideal copy mode: pure black ink, white paper, zero jitter/bleed')
-    parser.add_argument('--no-artifacts', dest='artifacts', action='store_false',
-                        help='Disable paper / ink aging artifacts')
-    parser.set_defaults(artifacts=True)
+    parser.add_argument('--white-paper', dest='aged_paper', action='store_false',
+                        help='Use plain white paper instead of aged paper texture')
+    parser.add_argument('--aged-paper', dest='aged_paper', action='store_true',
+                        help='Use aged paper texture [default]')
+    parser.add_argument('--no-ink-bleed', dest='ink_bleed', action='store_false',
+                        help='Disable Gaussian ink bleed / blur')
+    parser.add_argument('--ink-bleed', dest='ink_bleed', action='store_true',
+                        help='Enable Gaussian ink bleed / blur [default]')
+    parser.add_argument('--jitter', action='store_true',
+                        help='Enable per-character position jitter')
+    parser.add_argument('--dot-variation', action='store_true',
+                        help='Enable subtle per-character ink color variation')
+    parser.add_argument('--banding', action='store_true',
+                        help='Enable draft-mode pass-line banding')
+    parser.add_argument('--crease', action='store_true',
+                        help='Enable occasional page crease artifact')
+    parser.add_argument('--no-artifacts', action='store_true',
+                        help='Disable paper texture, ink bleed, jitter, banding, dot variation, and creases')
+    parser.add_argument('--left-margin-chars', type=float, default=0.0,
+                        help='Add left margin in character cells')
+    parser.add_argument('--right-margin-chars', type=float, default=0.0,
+                        help='Add right margin in character cells')
+    parser.add_argument('--top-margin-rows', type=float, default=0.0,
+                        help='Add top margin in row heights')
+    parser.add_argument('--bottom-margin-rows', type=float, default=0.0,
+                        help='Add bottom margin in row heights')
+    parser.add_argument('--auto-margins', action='store_true',
+                        help='Infer common left whitespace, apply symmetric side margins, and trim that shared padding')
+    parser.add_argument('--no-text-layer', dest='text_layer', action='store_false',
+                        help='Do not add an invisible searchable text layer to the PDF')
+    parser.set_defaults(aged_paper=True, ink_bleed=True)
+    parser.set_defaults(text_layer=True)
     args = parser.parse_args()
 
     orientation = 'landscape' if args.landscape else 'portrait'
@@ -809,22 +1002,57 @@ def main():
     # ideal overrides artifacts and draft
     if args.ideal:
         nlq = True
-        args.artifacts = False
+        args.aged_paper = False
+        args.ink_bleed = False
+        args.jitter = False
+        args.dot_variation = False
+        args.banding = False
+        args.crease = False
+    elif args.no_artifacts:
+        args.aged_paper = False
+        args.ink_bleed = False
+        args.jitter = False
+        args.dot_variation = False
+        args.banding = False
+        args.crease = False
 
     # ── Load input ────────────────────────────────────────────────────────
-    if args.input is None:
-        print('No input file specified — printing built-in demo document.')
+    output_path = args.output_file or args.output
+
+    if args.demo or args.input is None:
+        print('Printing built-in demo document.')
         data = DEMO_DOC
     else:
         with open(args.input, 'rb') as f:
             data = f.read()
 
+    auto_margin_chars = 0
+    if args.auto_margins:
+        auto_margin_chars = infer_common_left_margin_chars(data)
+
     quality_label = "Ideal (flat)" if getattr(args,'ideal',False) else ("NLQ" if nlq else "Draft")
     print(f'Paper     : {args.paper}  {orientation}')
     print(f'Quality   : {quality_label}')
     print(f'Pitch     : {args.cpi} CPI  /  {args.lpi} LPI')
-    print(f'Artifacts : {"on" if args.artifacts else "off"}')
-    print(f'Output    : {args.output}')
+    print('Render    : '
+          f'paper={"aged" if args.aged_paper else "white"}, '
+          f'bleed={"on" if args.ink_bleed else "off"}, '
+          f'jitter={"on" if args.jitter else "off"}, '
+          f'dots={"on" if args.dot_variation else "off"}, '
+          f'banding={"on" if args.banding else "off"}, '
+          f'crease={"on" if args.crease else "off"}')
+    if args.auto_margins:
+        print(f'Auto marg.: {auto_margin_chars:g} chars')
+    margin_parts = []
+    left_chars = args.left_margin_chars + auto_margin_chars
+    right_chars = args.right_margin_chars + auto_margin_chars
+    if left_chars or right_chars or args.top_margin_rows or args.bottom_margin_rows:
+        margin_parts.append(f'L={left_chars:g}ch')
+        margin_parts.append(f'R={right_chars:g}ch')
+        margin_parts.append(f'T={args.top_margin_rows:g}rows')
+        margin_parts.append(f'B={args.bottom_margin_rows:g}rows')
+        print(f'Margins   : {", ".join(margin_parts)}')
+    print(f'Output    : {output_path}')
     print()
 
     # ── Set up printer state & renderer ──────────────────────────────────
@@ -835,7 +1063,20 @@ def main():
         default_lpi=args.lpi,
         nlq=nlq,
     )
-    renderer = HP500Renderer(state, artifacts=args.artifacts, ideal=getattr(args,'ideal',False))
+    state.apply_margin_offsets(
+        left_chars=left_chars,
+        right_chars=right_chars,
+        top_rows=args.top_margin_rows,
+        bottom_rows=args.bottom_margin_rows,
+    )
+    renderer = HP500Renderer(
+        state,
+        ideal=getattr(args,'ideal',False),
+        jitter=args.jitter,
+        dot_variation=args.dot_variation,
+        banding=args.banding,
+        trim_left_chars=auto_margin_chars if args.auto_margins else 0,
+    )
     renderer.feed(data)
 
     total_pages = len(state.pages)
@@ -847,14 +1088,28 @@ def main():
     composed = []
     for i, ink_layer in enumerate(state.pages):
         print(f'  Compositing page {i+1}/{total_pages}...', end='\r')
-        page_rgb = compose_page(ink_layer, nlq, args.artifacts, rng, i, ideal=args.ideal)
+        page_rgb = compose_page(
+            ink_layer, nlq, rng, i,
+            ideal=args.ideal,
+            aged_paper=args.aged_paper,
+            ink_bleed=args.ink_bleed,
+            crease=args.crease,
+        )
         composed.append(page_rgb)
     print()
 
     # ── Build PDF ─────────────────────────────────────────────────────────
     print('Building PDF...')
-    build_pdf(composed, args.output, args.paper, orientation)
-    print(f'Done!  →  {args.output}')
+    if args.text_layer:
+        print('Text layer : on')
+    else:
+        print('Text layer : off')
+    build_pdf(
+        composed, output_path, args.paper, orientation,
+        text_pages=state.text_pages,
+        searchable=args.text_layer,
+    )
+    print(f'Done!  →  {output_path}')
 
 
 if __name__ == '__main__':

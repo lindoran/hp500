@@ -19,6 +19,7 @@
 #   LPI=6                         Lines per inch
 #   INPUT=                        Input file (omit to use built-in demo)
 #   OUTPUT=output.pdf             Output PDF path
+#   EXTRA=                        Additional hp500 flags
 #
 # Examples:
 #   make run INPUT=invoice.txt
@@ -101,7 +102,11 @@ _install_packages:
 _install_cmd:
 	@printf "\n$(BOLD)Installing hp500 command to $(INSTALL_DIR)...$(RESET)\n"
 	@printf "$(CYAN)──────────────────────────────────────$(RESET)\n"
-	sudo install -Dm755 $(SCRIPT) $(INSTALL_CMD)
+	@if [ -w "$(INSTALL_DIR)" ] || mkdir -p "$(INSTALL_DIR)" 2>/dev/null; then \
+	    install -Dm755 $(SCRIPT) $(INSTALL_CMD); \
+	else \
+	    sudo install -Dm755 $(SCRIPT) $(INSTALL_CMD); \
+	fi
 	$(call ok,Installed: $(INSTALL_CMD))
 	@printf "\n  You can now run:\n"
 	@printf "    $(BOLD)hp500 input.txt output.pdf$(RESET)\n"
@@ -145,7 +150,7 @@ check:
 	@printf "\n"
 
 # ── Render targets ────────────────────────────────────────────────────────────
-_FLAGS = --paper $(PAPER) --cpi $(CPI) --lpi $(LPI)
+_FLAGS = --paper $(PAPER) --cpi $(CPI) --lpi $(LPI) $(EXTRA)
 
 .PHONY: run
 run:
@@ -175,15 +180,15 @@ demo: demo_nlq.pdf demo_draft.pdf demo_ideal.pdf
 
 demo_nlq.pdf: $(SCRIPT)
 	$(call info,NLQ   → $@)
-	@python3 $(SCRIPT) $(INPUT) $@ $(_FLAGS)
+	@python3 $(SCRIPT) --demo -o $@ $(_FLAGS)
 
 demo_draft.pdf: $(SCRIPT)
 	$(call info,Draft → $@)
-	@python3 $(SCRIPT) $(INPUT) $@ $(_FLAGS) --draft
+	@python3 $(SCRIPT) --demo -o $@ $(_FLAGS) --draft
 
 demo_ideal.pdf: $(SCRIPT)
 	$(call info,Ideal → $@)
-	@python3 $(SCRIPT) $(INPUT) $@ $(_FLAGS) --ideal
+	@python3 $(SCRIPT) --demo -o $@ $(_FLAGS) --ideal
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 .PHONY: test

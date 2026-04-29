@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # install.sh — HP DeskJet 500 Emulator dependency installer
-# Supports Ubuntu / Xubuntu / Debian-based systems (all LTS and non-LTS)
+# Supports Ubuntu flavors / Linux Mint / Debian-based systems
 # =============================================================================
 
 set -e
@@ -52,7 +52,7 @@ detect_distro() {
             ;;
         *)
             error "Unsupported distro: ${DISTRO_ID}"
-            error "This installer supports Ubuntu, Xubuntu, Debian, and derivatives."
+            error "This installer supports Ubuntu flavors, Linux Mint, Debian, and derivatives."
             exit 1
             ;;
     esac
@@ -134,18 +134,23 @@ verify_imports() {
 
 # ── Optional: install emulator to PATH ───────────────────────────────────────
 install_script() {
-    section "Installing hp500_emulator to ${INSTALL_DIR}"
+    section "Installing hp500 to ${INSTALL_DIR}"
 
     if [[ ! -f "${SCRIPT_DIR}/hp500_emulator.py" ]]; then
         warn "hp500_emulator.py not found in ${SCRIPT_DIR} — skipping PATH install."
         return
     fi
 
-    $SUDO install -Dm755 "${SCRIPT_DIR}/hp500_emulator.py" \
-        "${INSTALL_DIR}/hp500_emulator"
+    if [[ -w "${INSTALL_DIR}" ]] || mkdir -p "${INSTALL_DIR}" 2>/dev/null; then
+        install -Dm755 "${SCRIPT_DIR}/hp500_emulator.py" \
+            "${INSTALL_DIR}/hp500"
+    else
+        $SUDO install -Dm755 "${SCRIPT_DIR}/hp500_emulator.py" \
+            "${INSTALL_DIR}/hp500"
+    fi
 
-    ok "Installed to ${INSTALL_DIR}/hp500_emulator"
-    info "Run with:  hp500_emulator input.txt output.pdf"
+    ok "Installed to ${INSTALL_DIR}/hp500"
+    info "Run with:  hp500 input.txt output.pdf"
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -168,11 +173,12 @@ main() {
     ok "Installation complete."
     echo
     echo -e "  ${CYAN}Usage:${RESET}"
-    echo "    python3 hp500_emulator.py input.txt output.pdf"
-    echo "    python3 hp500_emulator.py input.txt output.pdf --draft"
-    echo "    python3 hp500_emulator.py input.txt output.pdf --ideal"
-    echo "    python3 hp500_emulator.py input.txt output.pdf --paper a4"
-    echo "    python3 hp500_emulator.py             # prints built-in demo"
+    echo "    hp500 input.txt output.pdf"
+    echo "    hp500 input.txt output.pdf --draft"
+    echo "    hp500 input.txt output.pdf --ideal"
+    echo "    hp500 input.txt output.pdf --paper a4"
+    echo "    hp500 --demo -o demo.pdf"
+    echo "    hp500             # prints built-in demo to output.pdf"
     echo
 }
 

@@ -1,6 +1,6 @@
 # HP DeskJet 500 Print Emulator
 
-A nostalgic print emulator that converts ASCII / PCL text files into PDF output that looks exactly like it came off an HP DeskJet 500 series inkjet printer over a parallel port in DOS — aged paper, ink bleed, nozzle jitter and all.
+A nostalgic print emulator that converts ASCII / PCL text files into PDF output that looks like it came off an HP DeskJet 500 series inkjet printer over a parallel port in DOS — aged paper, ink bleed, and optional period artifacts.
 
 Supports the full 8-bit CP437 character set (box drawing, block elements, Greek, math symbols, Latin extended), HP PCL3 escape codes, Near Letter Quality and Draft rendering modes, and period-accurate page artifacts.
 
@@ -8,7 +8,7 @@ Supports the full 8-bit CP437 character set (box drawing, block elements, Greek,
 
 ## Requirements
 
-Ubuntu / Xubuntu / Debian and derivatives, 20.04 LTS onwards.
+Ubuntu flavors / Linux Mint / Debian and derivatives, 20.04 LTS onwards.
 
 | apt package | Purpose |
 |---|---|
@@ -40,10 +40,17 @@ make install
 
 The `hp500` command is the Python script itself — it carries a `#!/usr/bin/env python3` shebang so the OS invokes the interpreter directly with no wrapper needed.
 
-To install to your home directory instead (no sudo):
+To install the `hp500` command to your home directory instead of `/usr/local/bin`:
 
 ```bash
 make install INSTALL_DIR=~/.local/bin
+```
+
+The standalone installer does the same dependency checks and installs the same `hp500` command:
+
+```bash
+./install.sh
+./install.sh ~/.local/bin
 ```
 
 ### Verify the install
@@ -92,14 +99,54 @@ Omit the input file to print the built-in two-page demo document:
 hp500
 ```
 
+To write the built-in demo to a specific PDF:
+
+```bash
+hp500 --demo -o demo.pdf
+```
+
 ### Quality modes
 
 | Command | Mode | Description |
 |---|---|---|
-| `hp500 in.txt out.pdf` | **NLQ** | Near Letter Quality. Warm near-black ink, subtle ink bleed, paper fiber texture, per-character nozzle jitter. |
-| `hp500 in.txt out.pdf --draft` | **Draft** | Coarser inkjet dots, pass-line banding, lighter ink. |
+| `hp500 in.txt out.pdf` | **NLQ** | Near Letter Quality. Warm near-black ink, subtle ink bleed, aged paper fiber texture. |
+| `hp500 in.txt out.pdf --draft` | **Draft** | Lighter ink with stronger blur; add `--banding` for pass-line artifacts. |
 | `hp500 in.txt out.pdf --ideal` | **Ideal** | Pure black on white, zero jitter, no blur, no artifacts. For archiving or diffing documents. |
-| `hp500 in.txt out.pdf --no-artifacts` | **NLQ clean** | NLQ ink rendering, plain white paper, no aging. |
+| `hp500 in.txt out.pdf --no-artifacts` | **NLQ clean** | NLQ ink rendering, plain white paper, no blur or aging. |
+
+### Artifact controls
+
+Defaults are intentionally restrained: NLQ, aged paper, and ink bleed are on; jitter, dot variation, banding, and creases are off.
+
+```bash
+hp500 in.txt out.pdf --white-paper
+hp500 in.txt out.pdf --no-ink-bleed
+hp500 in.txt out.pdf --jitter
+hp500 in.txt out.pdf --dot-variation
+hp500 in.txt out.pdf --draft --banding
+hp500 in.txt out.pdf --crease
+```
+
+| Option | Effect |
+|---|---|
+| `--aged-paper` / `--white-paper` | Toggle paper texture |
+| `--ink-bleed` / `--no-ink-bleed` | Toggle Gaussian ink blur |
+| `--jitter` | Add per-character position wobble |
+| `--dot-variation` | Add subtle per-character ink color variation |
+| `--banding` | Add draft-mode pass-line banding |
+| `--crease` | Occasionally add a faint page crease |
+| `--no-artifacts` | Compatibility shortcut for white paper, no blur, no optional artifacts |
+
+### Searchable PDFs
+
+Generated PDFs include an invisible text layer by default. The visible page remains the 300 DPI bitmap render, but PDF viewers can search and copy text from the printed character cells.
+
+```bash
+hp500 manual.txt manual.pdf
+hp500 manual.txt image-only.pdf --no-text-layer
+```
+
+The text layer is recorded by the same renderer that draws the bitmap page. PCL and control codes do not get text cells; printable CP437 bytes do, after clipping, cursor movement, page breaks, and `--auto-margins` trimming have been applied. It is intended for search/copy, not as the visible document layout.
 
 ### Paper and pitch options
 
@@ -109,6 +156,21 @@ hp500 input.txt output.pdf --paper legal
 hp500 input.txt output.pdf --landscape
 hp500 input.txt output.pdf --cpi 17        # compressed (17 chars/inch)
 hp500 input.txt output.pdf --lpi 8         # tighter line spacing
+```
+
+### Margins
+
+Margins can be adjusted from the command line in character cells and row heights:
+
+```bash
+hp500 input.txt output.pdf --left-margin-chars 3 --right-margin-chars 3
+hp500 input.txt output.pdf --top-margin-rows 1 --bottom-margin-rows 1
+```
+
+For preformatted files that carry their own left padding, `--auto-margins` scans the full document before rendering. If every nonblank line starts three spaces in, it applies a three-character left margin, a three-character right margin, and trims those shared leading spaces while rendering so the output does not shift right twice.
+
+```bash
+hp500 report.txt report.pdf --auto-margins
 ```
 
 | Option | Values | Default |
@@ -128,11 +190,25 @@ positional arguments:
   output        Output PDF path  [default: output.pdf]
 
 options:
+  -o, --output-file  Output PDF path  [overrides positional output]
+  --demo       Print the built-in demo document
   --paper       letter | a4 | legal | executive
   --landscape   Landscape orientation
   --draft       Draft quality mode
   --ideal       Ideal copy mode: pure black, white paper, zero jitter
-  --no-artifacts  Disable paper and ink aging artifacts
+  --white-paper  Use plain white paper
+  --no-ink-bleed  Disable ink blur
+  --jitter      Enable per-character position jitter
+  --dot-variation  Enable subtle ink color variation
+  --banding     Enable draft-mode pass-line banding
+  --crease      Enable occasional page crease artifact
+  --no-artifacts  Disable all paper/ink artifacts
+  --left-margin-chars N
+  --right-margin-chars N
+  --top-margin-rows N
+  --bottom-margin-rows N
+  --auto-margins
+  --no-text-layer
   --cpi         Characters per inch  [default: 10]
   --lpi         Lines per inch  [default: 6]
 ```
@@ -150,6 +226,7 @@ make demo                            # render built-in demo: NLQ + Draft + Ideal
 make demo PAPER=a4                   # demo on A4 paper
 make run INPUT=myfile.txt            # NLQ render → output.pdf
 make run INPUT=myfile.txt OUTPUT=myfile.pdf
+make run INPUT=myfile.txt EXTRA="--auto-margins --jitter"
 make run-draft INPUT=myfile.txt OUTPUT=draft.pdf
 make run-ideal INPUT=myfile.txt OUTPUT=clean.pdf
 make test                            # check + demo + verify all outputs exist
@@ -249,17 +326,17 @@ F0 | ≡  ±  ≥  ≤  ⌠  ⌡  ÷  ≈  °  ∙  ·  √  ⁿ  ²  ■
 
 ## Column geometry
 
-At 10 CPI with 0.5 inch margins on letter paper:
+At 10 CPI with 0.25 inch left/right margins on letter paper:
 
 ```
 Page width    = 8.5"
-Left margin   = 0.5"  →  right margin = 0.5"
-Printable     = 7.5" × 10 CPI = 75 characters maximum per line
+Left margin   = 0.25"  →  right margin = 0.25"
+Printable     = 8.0" × 10 CPI = 80 characters maximum per line
 ```
 
-Lines longer than 75 characters are clipped at the right margin — the same behaviour as the real printer (characters past the margin hit the platen and don't print). There is no word wrap.
+Lines longer than 80 characters are clipped at the right margin — the same behaviour as the real printer (characters past the margin hit the platen and don't print). There is no word wrap.
 
-At 17 CPI (compressed): `7.5" × 17 = 127 characters` per line.
+At 17 CPI (compressed): `8.0" × 17 = 136 characters` per line.
 
 ---
 
@@ -275,11 +352,12 @@ PCL parser          Tokenises escape sequences, control codes, CP437 chars
 HP500Renderer       Maintains printer state (cursor, margins, font, mode)
     │               Renders each glyph onto a 300 DPI RGBA ink layer
     ▼
-compose_page()      Composites ink onto aged paper (NumPy fiber noise + vignette)
-    │               NLQ: Gaussian ink bleed    Draft: coarser blur + pass banding
-    │               Optional: page crease artifact
+compose_page()      Composites ink onto paper
+    │               Default: aged paper + Gaussian ink bleed
+    │               Optional: jitter, dot variation, draft banding, page crease
     ▼
 build_pdf()         Embeds each page as JPEG into a ReportLab PDF
+                    Adds an invisible searchable text layer by default
                     Physical page dimensions set exactly in points (1/72 inch)
 ```
 
@@ -290,7 +368,7 @@ Resolution is fixed at **300 × 300 DPI**, the HP DeskJet 500's native print res
 ## File layout
 
 ```
-hp500_emulator.py   Main script — also the installed command (shebang executable)
+hp500_emulator.py   Main script — installed as the hp500 command
 install.sh          Standalone installer (alternative to make install)
 Makefile            Build, install, test, and render targets
 README.md           This file
@@ -302,13 +380,20 @@ README.md           This file
 
 | OS | Release | python3-pil | python3-reportlab | python3-numpy |
 |---|---|---|---|---|
-| Xubuntu | 20.04 LTS Focal | 8.1.2 | 3.5.34 | 1.19.5 |
-| Xubuntu | 22.04 LTS Jammy | 9.0.1 | 3.6.8 | 1.21.5 |
+| Ubuntu flavors | 20.04 LTS Focal | 8.1.2 | 3.5.34 | 1.19.5 |
+| Ubuntu flavors | 22.04 LTS Jammy | 9.0.1 | 3.6.8 | 1.21.5 |
 | Ubuntu  | 24.04 LTS Noble | 10.2.x | 4.1.0 ¹ | 1.26.4 |
 | Ubuntu  | 24.10 Oracular | ✓ | 4.2.2 ¹ | ✓ |
 | Ubuntu  | 25.04 Plucky | ✓ | 4.3.1 ¹ | ✓ |
+| Linux Mint | 21.x | same as Ubuntu 22.04 Jammy | same as Ubuntu 22.04 Jammy | same as Ubuntu 22.04 Jammy |
+| Linux Mint | 22.x | same as Ubuntu 24.04 Noble | same as Ubuntu 24.04 Noble ¹ | same as Ubuntu 24.04 Noble |
+| LMDE | 6 | same as Debian 12 Bookworm | same as Debian 12 Bookworm | same as Debian 12 Bookworm |
 
 ¹ In universe repository — enabled automatically by `make install` and `install.sh`.
+
+Linux Mint reports `ID=linuxmint` in `/etc/os-release`; `install.sh` accepts that ID directly. Standard Linux Mint uses Ubuntu package bases, while LMDE uses Debian package bases, so the apt package names used by the build chain are unchanged.
+
+Kubuntu, Xubuntu, Lubuntu, and other Ubuntu flavors use the same Ubuntu package repositories for these dependencies; only the desktop environment differs for this project.
 
 ---
 
